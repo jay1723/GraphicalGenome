@@ -15,4 +15,4 @@ This dataset will allow you to use the tools specified above and is meant to sho
 
 ## Dataset hosted
 
-`wget ftp://ftp.csbio.unc.edu/CCGG/Version0.9.zip`
+`curl -O ftp://ftp.csbio.unc.edu/CCGG/Version0.9.zip`
