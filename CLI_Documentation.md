@@ -5,7 +5,10 @@ To dump a sequence:
 * nodefile - Absolute Path to the nodefile you wish to load
 * edgefile - Aboslute path to the edgefile you wish to load
 * chromosome - Number of the chromosome you are currently evaluating
-* sequenceName - The name of the strain you wish to retrieve the path for
+* sequenceName - Takes the arguments, strain path filename. 
+ * Strain is the sequence you are looking to extract. 
+ * Path [0,1,2] defines which path to take in the case of heterozygozity (0 for homozygous). 
+ * Filename defines the destination for the sequence to be placed. 
 
 `python CCGG_CLI.py nodefile edgefile chromosome [--sequence strain path filedest]`
 
