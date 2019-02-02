@@ -38,40 +38,24 @@ class GraphicalGenome:
         edge = {}
         sources = {}
         destinations = {}
-        startNodeLoad = time.time()
         hdr, seq = self.loadFasta(nodefile)
-        endNodeLoad = time.time()
-        print len(hdr), "Nodes",
         # Nodes
-        startNodeLoop = time.time()
         for i in xrange(len(hdr)):
             part = hdr[i].split(';')
             key = part.pop(0)
-#             node[key] = json.loads(part.pop(0), object_hook=self.encodeASCII) # popping the second item always pops the JSON
+
             node[key] = cjson.decode(part.pop(0)) # popping the second item always pops the JSON
             node[key]['seq'] = seq[i]
-        endNodeLoop = time.time()
-        startEdgeLoad = time.time()
         hdr, seq = self.loadFasta(edgefile)
-        endEdgeLoad = time.time()
-        print len(hdr), "Edges",
         # Edges
-        startEdgeLoop = time.time()
         for i in xrange(len(hdr)):
             part = hdr[i].split(';')
             key = part.pop(0)
-#             edge[key] = json.loads(part.pop(0), object_hook=self.encodeASCII) # popping the second item always pops the JSON
             edge[key] = cjson.decode(part.pop(0)) # popping the second item always pops the JSON
             # Make these their own data structures
             sources[edge[key]['src']] = sources.get(edge[key]['src'], []) + [key]
             destinations[edge[key]['dst']] = destinations.get(edge[key]['dst'], []) + [key]
             edge[key]['seq'] = seq[i]
-        endEdgeLoop = time.time()
-        nodeload = endNodeLoad-startNodeLoad
-        edgeload = endEdgeLoad - startEdgeLoad
-        nodeloop = endNodeLoop - startNodeLoop
-        edgeloop = endEdgeLoop - startEdgeLoop
-        print "Loading node: %d - Node Loop: %d - Loading Edge: %d - Edge Loop: %d" % (nodeload, nodeloop, edgeload, edgeloop)
         return node, edge, sources, destinations
     
 
