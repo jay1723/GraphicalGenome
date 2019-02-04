@@ -1,12 +1,11 @@
 import cjson
 import numpy
-import time
 import json
 from collections import defaultdict
 class GraphicalGenome:
     
     def __init__(self, nodefile, edgefile):
-        self.nodes, self.edges, self.outgoing, self.incoming = self.loadChromosomeGraph(nodefile, edgefile)
+        self.nodes, self.edges, self.outgoing, self.incoming, self.max_node_name, self.max_edge_name = self.loadChromosomeGraph(nodefile, edgefile)
         tmp = []
         for i in sorted(self.nodes.keys(), key = lambda n: int(self.nodes[n]["B"])):
             tup = (i, int(self.nodes[i]["A"]), int(self.nodes[i]["B"]), int(self.nodes[i]["C"]),
@@ -34,6 +33,8 @@ class GraphicalGenome:
         Outputs the nodes and edges as dictionaries as well as auxilary dictionaries containing node -> list(edge) 
         pairs 
         """
+        max_node = 0
+        max_edge = 0
         node = {}
         edge = {}
         sources = {}
@@ -43,7 +44,6 @@ class GraphicalGenome:
         for i in xrange(len(hdr)):
             part = hdr[i].split(';')
             key = part.pop(0)
-
             node[key] = cjson.decode(part.pop(0)) # popping the second item always pops the JSON
             node[key]['seq'] = seq[i]
         hdr, seq = self.loadFasta(edgefile)
@@ -51,12 +51,18 @@ class GraphicalGenome:
         for i in xrange(len(hdr)):
             part = hdr[i].split(';')
             key = part.pop(0)
+            # updates the max seen edge number only if it is floating and is not a sink or source edge
+            if "F" in key and "S" not in key and "K" not in key:
+                max_edge = max(max_edge, int(key[-7:]))
             edge[key] = cjson.decode(part.pop(0)) # popping the second item always pops the JSON
-            # Make these their own data structures
             sources[edge[key]['src']] = sources.get(edge[key]['src'], []) + [key]
             destinations[edge[key]['dst']] = destinations.get(edge[key]['dst'], []) + [key]
             edge[key]['seq'] = seq[i]
-        return node, edge, sources, destinations
+            if "F" == edge[key]["dst"][0]:
+                max_node = max(max_node, int(edge[key]["dst"][-8:]))
+            if "F" == edge[key]["src"][0]:
+                max_node = max(max_node, int(edge[key]["src"][-8:]))
+        return node, edge, sources, destinations, max_node, max_edge
     
 
     def writeFasta(self, filename, file_dict):
