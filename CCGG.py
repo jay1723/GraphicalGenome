@@ -1,20 +1,60 @@
 import cjson
 import numpy
 import json
-from collections import defaultdict
-class GraphicalGenome:
+import time
+
+# Overridden dict class to allow for lazy evaluation of nodes
+class Nodes(dict):
+    def __init__(self, inp):
+        self.nodes = inp
+        
+    # Override getitem to account for lazy evaluation
+    def __getitem__(self,key):
+        return self.getNode(key)
+
+    def getNode(self, nodename):
+        if "hdr" in self.nodes[nodename].keys():
+            seq = self.nodes[nodename]["seq"]
+            hdr = self.nodes[nodename]["hdr"]
+            del self.nodes[nodename]
+            self.nodes[nodename] = cjson.decode(hdr)
+            self.nodes[nodename]["seq"] = seq
+            return self.nodes[nodename]
+        return self.nodes[nodename]
+
+# Overridden dict class to allow for lazy evaluation of edges
+class Edges(dict):
+    def __init__(self, inp):
+        self.edges = inp
     
+    # Override getitem to account for lazy evaluation
+    def __getitem__(self,key):
+        return self.getEdge(key)
+    
+    def getEdge(self, edgename):
+        if "hdr" in self.edges[edgename].keys():
+            seq = self.edges[edgename]["seq"]
+            hdr = self.edges[edgename]["hdr"]
+            del self.edges[edgename]
+            self.edges[edgename] = cjson.decode(hdr)
+            self.edges[edgename]["seq"] = seq
+            return self.edges[edgename]
+        return self.edges[edgename]    
+    
+class GraphicalGenome:
     def __init__(self, nodefile, edgefile):
-        self.nodes, self.edges, self.outgoing, self.incoming, self.max_node_name, self.max_edge_name = self.loadChromosomeGraph(nodefile, edgefile)
-        tmp = []
-        for i in sorted(self.nodes.keys(), key = lambda n: int(self.nodes[n]["B"])):
-            tup = (i, int(self.nodes[i]["A"]), int(self.nodes[i]["B"]), int(self.nodes[i]["C"]),
-                  int(self.nodes[i]["D"]), int(self.nodes[i]["E"]), int(self.nodes[i]["F"]), 
-                  int(self.nodes[i]["G"]), int(self.nodes[i]["H"]))
-            tmp.append(tup)
-        dt = [("node", "U20"), ("A", "i8"), ("B", "i8"), ("C", "i8"), ("D", "i8"), 
-              ("E", "i8"), ("F", "i8"), ("G", "i8"), ("H", "i8")]
-        self.sortednodes = numpy.array(tmp, dtype=dt)
+        self.nodes, self.edges, self.outgoing, self.incoming, self.max_node_name, self.max_edge_name, self.genes = self.loadChromosomeGraph(nodefile, edgefile)
+        self.nodes = Nodes(self.nodes)
+        self.edges = Edges(self.edges)
+#         tmp = []
+#         for i in sorted(self.nodes.keys(), key = lambda n: int(self.nodes[n]["B"])):
+#             tup = (i, int(self.nodes[i]["A"]), int(self.nodes[i]["B"]), int(self.nodes[i]["C"]),
+#                   int(self.nodes[i]["D"]), int(self.nodes[i]["E"]), int(self.nodes[i]["F"]), 
+#                   int(self.nodes[i]["G"]), int(self.nodes[i]["H"]))
+#             tmp.append(tup)
+#         dt = [("node", "U20"), ("A", "i8"), ("B", "i8"), ("C", "i8"), ("D", "i8"), 
+#               ("E", "i8"), ("F", "i8"), ("G", "i8"), ("H", "i8")]
+#         self.sortednodes = numpy.array(tmp, dtype=dt)
 
     def __repr__(self):
         return "Number of Nodes %d - Number of Edges %d" % (len(self.nodes), len(self.edges))
@@ -33,58 +73,110 @@ class GraphicalGenome:
         Outputs the nodes and edges as dictionaries as well as auxilary dictionaries containing node -> list(edge) 
         pairs 
         """
+        # Instantiate returned datastructures
         max_node = 0
         max_edge = 0
-        node = {}
-        edge = {}
+        nodes = {}
+        edges = {}
         sources = {}
         destinations = {}
-        hdr, seq = self.loadFasta(nodefile)
-        # Nodes
-        for i in xrange(len(hdr)):
-            part = hdr[i].split(';')
-            key = part.pop(0)
-            node[key] = cjson.decode(part.pop(0)) # popping the second item always pops the JSON
-            node[key]['seq'] = seq[i]
-        hdr, seq = self.loadFasta(edgefile)
-        # Edges
-        for i in xrange(len(hdr)):
-            part = hdr[i].split(';')
-            key = part.pop(0)
-            # updates the max seen edge number only if it is floating and is not a sink or source edge
+        genes = {}
+
+        # Load Nodefile
+        snh = time.time()
+        nodehdr, nodeseq = self.loadFasta(nodefile)
+        print "Node FASTA load %5.2f" % (time.time() - snh)
+        # Populate base node dictionary without evaluating any JSON
+        sn = time.time()
+        for i in xrange(len(nodehdr)):
+            part = nodehdr[i].split(';',1)
+            node = part.pop(0)
+            nodes[node] = {}
+            nodes[node]["hdr"] = part.pop(0)
+            nodes[node]["seq"] = nodeseq[i]
+            
+#             # Check existence of gene annotation and add to dictionary
+#             gene_full = re.search(gene_pattern, nodehdr[i])
+#             if gene_full:
+#                 gene = gene_full.group()
+#                 genelist = gene[8:-1].split(",")
+#                 for i in genelist:
+#                     genekey = i[1:-1]
+#                     genes[genekey] = genes.get(genekey, []) + [node]
+                
+        print "Node loop %5.2f" % (time.time() - sn)
+#         del nodehdr
+#         del nodeseq
+        # Load Edgefile
+        
+        seh = time.time()
+        edgehdr, edgeseq = self.loadFasta(edgefile)
+        print "Edge FASTA load %5.2f" % (time.time()-seh)
+        se = time.time()
+        for i in xrange(len(edgehdr)):
+            part = edgehdr[i].split(";",1)
+#             src = part[1].split('"src":',1)[1].split('"', 2)
+#             dst = src[2].split('"dst":', 1)[1].split('"',2)[1]
+#             src = src[1]
+#             key = part[0]
+            src = edgehdr[i][21:33]
+            dst = edgehdr[i][42:54]
+            key = edgehdr[i][0:12]
+
+            # Populate base edge dictionary without evaluating any JSON
+            edges[key] = {}
+            edges[key]["hdr"] = edgehdr[i][13:]
+            edges[key]["seq"] = edgeseq[i]
+
+            # Populate sources and destinations dictionaries
+            sources[src] = sources.get(src, []) + [key]
+            destinations[dst] = destinations.get(dst, []) + [key]
+            
+            # Check existence of gene annotation and add to dictionary
+#             gene_full = re.search(gene_pattern, edgehdr[i])
+#             if gene_full:
+#                 gene = gene_full.group()
+#                 genelist = gene[8:-1].split(",")
+#                 for i in genelist:
+#                     genekey = i[1:-1]
+#                     genes[genekey] = genes.get(genekey, []) + [key]
+                
+#             # Update edge global counters
             if "F" in key and "S" not in key and "K" not in key:
                 max_edge = max(max_edge, int(key[-7:]))
-            edge[key] = cjson.decode(part.pop(0)) # popping the second item always pops the JSON
-            sources[edge[key]['src']] = sources.get(edge[key]['src'], []) + [key]
-            destinations[edge[key]['dst']] = destinations.get(edge[key]['dst'], []) + [key]
-            edge[key]['seq'] = seq[i]
-            if "F" == edge[key]["dst"][0]:
-                max_node = max(max_node, int(edge[key]["dst"][-8:]))
-            if "F" == edge[key]["src"][0]:
-                max_node = max(max_node, int(edge[key]["src"][-8:]))
-        return node, edge, sources, destinations, max_node, max_edge
-    
+#             # Update node global counters
+            if "F" == dst[0]:
+                max_node = max(max_node, int(dst[-8:]))
+            if "F" == src[0]:
+                max_node = max(max_node, int(src[-8:]))
+        print "Edge loop %5.2f" % (time.time() - se)
+        del edgehdr
+        del edgeseq
+        return nodes, edges, sources, destinations, max_node, max_edge, genes
 
-    def writeFasta(self, filename, file_dict):
+    
+    ## FIXZ THIS TO NOT EVALUATE JSON THAT HAS NOT BEEN EVALUATED YET
+
+    def writeFasta(input_dict, filename, keylist=["src", "dst"]):
+        """ Writes FASTA formatted file in the correct order to allow for lazy evaluation in init
         """
-        Inputs:
-            filename - Absolute path to where you want the file to be written including the file name
-            file_dict - The updated node/edge dictionary that you wish to write
-        Outputs FASTA formatted file at path specified in argument. Assumes that 
-        """
-        sorted_keys = sorted(file_dict.keys())
-        with open(filename, "w+") as fastafile: 
-            for i in sorted_keys:
-                line = ">" + i + ";"
-                obj = {}
-                for j in file_dict[i].keys():
-                    if j == 'seq':
+        sorted_keys = sorted(input_dict.keys()) 
+        with open(filename, "w+") as fastafile:
+            for edge in sorted_keys:
+                line = ">" + edge + ";{" 
+                # Source
+                line += '"src":"' + input_dict[edge]["src"] + '",'
+                # Destination
+                line += '"dst":"' + input_dict[edge]["dst"] + '"'
+                for key in input_dict[edge].keys():
+                    if key == "seq":
                         continue
-                    obj[j] = file_dict[i][j]
-                line += json.dumps(obj, separators=(",", ":"))
-                line += "\n" + file_dict[i]['seq'] + "\n"
+                    if key in keylist:
+                        continue
+                    line += ',"' + key + '":' + json.dumps(input_dict[edge][key], separators=(",", ":"))
+                line += "}\n"
+                line += input_dict[edge]["seq"] + "\n"
                 fastafile.write(line)
-        return
 
     def loadFasta(self, filename):
         """ Parses a classically formatted and possibly 
@@ -263,7 +355,4 @@ class GraphicalGenome:
         with open(filedest, "w+") as seqfile:
             seqfile.write(reconstructed)
             
-
-                
-            
-
+        
