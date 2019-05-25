@@ -7,6 +7,8 @@ The CCGG, or Collaborative Cross Graphical Genome, is a novel data structure aim
 ### Graphical Genome API
 This is a simple Python class that abstracts away the Graphical Genome as a basic data structure. Through a series of simple commands you have the ability to load, store, explore, and analyze genomic data through a directed graph. 
 
+Docstrings included for all methods in the Graphical Genome. Running `help(<methodname>)` will print out documentation for the given method.
+
 ### Graphical Genome CLI
 A basic command line interface that allows you to perform simple commands like specifying sequence information and a file location and dumping that sequence from the graphical genome to that specified file location for further examination. 
 
