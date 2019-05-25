@@ -1,17 +1,29 @@
 import cjson
 import numpy
 import json
+import re
 import time
 
-# Overridden dict class to allow for lazy evaluation of nodes
 class Nodes(dict):
     def __init__(self, inp):
         self.nodes = inp
-        
     # Override getitem to account for lazy evaluation
     def __getitem__(self,key):
         return self.getNode(key)
-
+    
+    def __setitem__(self, key, value):
+        self.nodes[key] = value
+    
+    def __contains__(self, key):
+        return key in self.nodes
+            
+    def __repr__(self):
+        return self.nodes
+    
+    def keys(self):
+        return self.nodes.keys()
+    
+    # getNode allows for lazy evaluation
     def getNode(self, nodename):
         if "hdr" in self.nodes[nodename].keys():
             seq = self.nodes[nodename]["seq"]
@@ -21,15 +33,34 @@ class Nodes(dict):
             self.nodes[nodename]["seq"] = seq
             return self.nodes[nodename]
         return self.nodes[nodename]
-
-# Overridden dict class to allow for lazy evaluation of edges
+    
+    def returnDict(self):
+        return self.nodes
+    
+    def removeNode(self, nodename):
+        output = self.nodes.pop(nodename, None)
+        if output == None:
+            output = "Key does not exist in dictionary"
+        return output
+    
 class Edges(dict):
     def __init__(self, inp):
         self.edges = inp
-    
-    # Override getitem to account for lazy evaluation
+        
     def __getitem__(self,key):
         return self.getEdge(key)
+    
+    def __setitem__(self, key, value):
+        self.edges[key] = value
+    
+    def __contains__(self, key):
+        return key in self.edges
+    
+    def __repr__(self):
+        return self.edges
+            
+    def keys(self):
+        return self.edges.keys()            
     
     def getEdge(self, edgename):
         if "hdr" in self.edges[edgename].keys():
@@ -40,22 +71,24 @@ class Edges(dict):
             self.edges[edgename]["seq"] = seq
             return self.edges[edgename]
         return self.edges[edgename]    
+       
+    def returnDict(self):
+        return self.edges
     
+    def removeEdge(self, edgename):
+        output = self.edges.pop(edgename, None)
+        if output == None:
+            output = "Key does not exist in dictionary"
+        return output
+
 class GraphicalGenome:
-    def __init__(self, nodefile, edgefile):
+    
+    def __init__(self, nodefile, edgefile, verbose=False):
+        self.verbose = verbose
         self.nodes, self.edges, self.outgoing, self.incoming, self.max_node_name, self.max_edge_name, self.genes = self.loadChromosomeGraph(nodefile, edgefile)
         self.nodes = Nodes(self.nodes)
         self.edges = Edges(self.edges)
-#         tmp = []
-#         for i in sorted(self.nodes.keys(), key = lambda n: int(self.nodes[n]["B"])):
-#             tup = (i, int(self.nodes[i]["A"]), int(self.nodes[i]["B"]), int(self.nodes[i]["C"]),
-#                   int(self.nodes[i]["D"]), int(self.nodes[i]["E"]), int(self.nodes[i]["F"]), 
-#                   int(self.nodes[i]["G"]), int(self.nodes[i]["H"]))
-#             tmp.append(tup)
-#         dt = [("node", "U20"), ("A", "i8"), ("B", "i8"), ("C", "i8"), ("D", "i8"), 
-#               ("E", "i8"), ("F", "i8"), ("G", "i8"), ("H", "i8")]
-#         self.sortednodes = numpy.array(tmp, dtype=dt)
-
+        
     def __repr__(self):
         return "Number of Nodes %d - Number of Edges %d" % (len(self.nodes), len(self.edges))
         
@@ -65,14 +98,13 @@ class GraphicalGenome:
     def encodeASCII(self, data):
         return dict((k.encode('ascii'), [i.encode('ascii') for i in v] if isinstance(v, list) else v.encode('ascii')) for k, v in data.items())
 
+    
+
+# Inputs:
+    # nodefile - Absolute path to the nodefile you wish to open
+    # edgefile - Absolute path to the edgefile you wish to open
+# Outputs the nodes and edges as dictionaries as well as auxilary dictionaries containing node -> list(edge) pairs 
     def loadChromosomeGraph(self, nodefile, edgefile):
-        """
-        Inputs:
-            nodefile - Absolute path to the nodefile you wish to open
-            edgefile - Absolute path to the edgefile you wish to open
-        Outputs the nodes and edges as dictionaries as well as auxilary dictionaries containing node -> list(edge) 
-        pairs 
-        """
         # Instantiate returned datastructures
         max_node = 0
         max_edge = 0
@@ -81,167 +113,125 @@ class GraphicalGenome:
         sources = {}
         destinations = {}
         genes = {}
-
-        # Load Nodefile
+        
         snh = time.time()
-        nodehdr, nodeseq = self.loadFasta(nodefile)
-        print "Node FASTA load %5.2f" % (time.time() - snh)
-        # Populate base node dictionary without evaluating any JSON
-        sn = time.time()
-        for i in xrange(len(nodehdr)):
-            part = nodehdr[i].split(';',1)
-            node = part.pop(0)
-            nodes[node] = {}
-            nodes[node]["hdr"] = part.pop(0)
-            nodes[node]["seq"] = nodeseq[i]
-            
+        # Node iterations
+        with open(nodefile, "r") as fp:
+            hdr = fp.readline()[1:]
+            seq = fp.readline()
+            while hdr and seq:
+                node =  hdr[0:12]
+                nodehdr = hdr[13:]
+                nodes[node] = {}
+                # Strip newlines if they exist at the end
+                if nodehdr[-1] == "\n":
+                    nodehdr = nodehdr[:-1]
+                if seq[-1] == "\n":
+                    seq = seq[:-1]
+                nodes[node]["hdr"] = nodehdr 
+                nodes[node]["seq"] = seq 
+
+                hdr = fp.readline()[1:]
+                seq = fp.readline()
 #             # Check existence of gene annotation and add to dictionary
-#             gene_full = re.search(gene_pattern, nodehdr[i])
+#             gene_full = re.search(gene_pattern, hdr)
 #             if gene_full:
 #                 gene = gene_full.group()
 #                 genelist = gene[8:-1].split(",")
 #                 for i in genelist:
 #                     genekey = i[1:-1]
 #                     genes[genekey] = genes.get(genekey, []) + [node]
-                
-        print "Node loop %5.2f" % (time.time() - sn)
-#         del nodehdr
-#         del nodeseq
-        # Load Edgefile
+
+        if self.verbose:
+            print "Node load %5.2f" % (time.time() - snh)
         
-        seh = time.time()
-        edgehdr, edgeseq = self.loadFasta(edgefile)
-        print "Edge FASTA load %5.2f" % (time.time()-seh)
-        se = time.time()
-        for i in xrange(len(edgehdr)):
-            part = edgehdr[i].split(";",1)
-#             src = part[1].split('"src":',1)[1].split('"', 2)
-#             dst = src[2].split('"dst":', 1)[1].split('"',2)[1]
-#             src = src[1]
-#             key = part[0]
-            src = edgehdr[i][21:33]
-            dst = edgehdr[i][42:54]
-            key = edgehdr[i][0:12]
-
-            # Populate base edge dictionary without evaluating any JSON
-            edges[key] = {}
-            edges[key]["hdr"] = edgehdr[i][13:]
-            edges[key]["seq"] = edgeseq[i]
-
-            # Populate sources and destinations dictionaries
-            sources[src] = sources.get(src, []) + [key]
-            destinations[dst] = destinations.get(dst, []) + [key]
-            
-            # Check existence of gene annotation and add to dictionary
-#             gene_full = re.search(gene_pattern, edgehdr[i])
-#             if gene_full:
-#                 gene = gene_full.group()
-#                 genelist = gene[8:-1].split(",")
-#                 for i in genelist:
-#                     genekey = i[1:-1]
-#                     genes[genekey] = genes.get(genekey, []) + [key]
+        seh = time.time()        
+        # Edge iteration
+        with open(edgefile, "r") as fp:
+            hdr = fp.readline()[1:]
+            seq = fp.readline()
+            while hdr and seq:
+                # Extract the src, dst, key from the header
+                src = hdr[21:33]
+                dst = hdr[42:54]
+                key = hdr[0:12]
                 
-#             # Update edge global counters
-            if "F" in key and "S" not in key and "K" not in key:
-                max_edge = max(max_edge, int(key[-7:]))
-#             # Update node global counters
-            if "F" == dst[0]:
-                max_node = max(max_node, int(dst[-8:]))
-            if "F" == src[0]:
-                max_node = max(max_node, int(src[-8:]))
-        print "Edge loop %5.2f" % (time.time() - se)
-        del edgehdr
-        del edgeseq
+                # Source and sink nodes are not the same size as other nodes so special case needed
+                if "SOURCE" in src:
+                    dst = hdr[36:48]
+                    src = "SOURCE"
+                if "SINK" in dst:
+                    dst = "SINK"
+                
+                # Add header and seq to the edges dictionary
+                # Strip newlines if they exist at the end
+                if hdr[-1] == "\n":
+                    hdr = hdr[:-1]
+                if seq[-1] == "\n":
+                    seq = seq[:-1]
+                edges[key] = {}
+                edges[key]["hdr"] = hdr[13:]
+                edges[key]["seq"] = seq
+                
+                # Lazy eval the sources and destinations dictionary
+                sources[src] = sources.get(src, []) + [key]
+                destinations[dst] = destinations.get(dst, []) + [key]
+
+                # Update global counters
+                if "F" in key and "S" not in key and "K" not in key:
+                    max_edge = max(max_edge, int(key[-7:]))
+                if "F" == dst[0]:
+                    max_node = max(max_node, int(dst[-8:]))
+                if "F" == src[0]:
+                    max_node = max(max_node, int(src[-8:]))
+                    
+                # Load the next line for the next iteration
+                hdr = fp.readline()[1:]
+                seq = fp.readline()  
+                
+        if self.verbose:
+            print "Edge load %5.2f" % (time.time() - seh)
+            print "# Nodes %5.2d" % (len(nodes))
+            print "# Edges %5.2d" % (len(edges))
         return nodes, edges, sources, destinations, max_node, max_edge, genes
-
     
-    ## FIXZ THIS TO NOT EVALUATE JSON THAT HAS NOT BEEN EVALUATED YET
-
-    def writeFasta(input_dict, filename, keylist=["src", "dst"]):
-        """ Writes FASTA formatted file in the correct order to allow for lazy evaluation in init
-        """
+    def writeFasta(self, filename, input_dict, keylist=["src", "dst"]):
         sorted_keys = sorted(input_dict.keys()) 
         with open(filename, "w+") as fastafile:
-            for edge in sorted_keys:
-                line = ">" + edge + ";{" 
-                # Source
-                line += '"src":"' + input_dict[edge]["src"] + '",'
-                # Destination
-                line += '"dst":"' + input_dict[edge]["dst"] + '"'
-                for key in input_dict[edge].keys():
-                    if key == "seq":
+            # If iterating through the edges, write the edges in the correctly ordered format
+            if (sorted_keys[0][0] == "E"):
+                for edge in sorted_keys:
+                    # If header has not been evaluated, just re-write the header wholesale without any analysis
+                    if "hdr" in input_dict[edge].keys():
+                        line = ">" + edge + ";" + input_dict[edge]["hdr"] + "\n"
+                        line += input_dict[edge]["seq"] + "\n"
                         continue
-                    if key in keylist:
-                        continue
-                    line += ',"' + key + '":' + json.dumps(input_dict[edge][key], separators=(",", ":"))
-                line += "}\n"
-                line += input_dict[edge]["seq"] + "\n"
-                fastafile.write(line)
-
-    def loadFasta(self, filename):
-        """ Parses a classically formatted and possibly 
-            compressed FASTA file into a list of headers 
-            and fragment sequences for each sequence contained.
-            The resulting sequences are 0-indexed! """
-        if (filename.endswith(".gz")):
-            fp = gzip.open(filename, 'rb')
-        else:
-            fp = open(filename, 'rb')
-        # split at headers
-        data = fp.read().split('>')
-        fp.close()
-        # ignore whatever appears before the 1st header
-        data.pop(0)     
-        headers = []
-        sequences = []
-        for sequence in data:
-            lines = sequence.split('\n')
-            headers.append(lines.pop(0))
-            sequences.append(''.join(lines))
-        return (headers, sequences)
-
-    def showParallelEdges(self, edge):
-        """  
-        """
-        src = self.edges[edge]["src"]
-        dst = self.edges[edge]["dst"]
-        parallelEdges = []
-        found = True
-        outgoing = set(self.outgoing[src])
-        incoming = set(self.incoming[dst])
-        return list(outgoing and incoming)
-    
-        for i in self.outgoing[src]:
-            currentEdge = i
-            while(self.edges[currentEdge]["dst"] != dst):
-                currentEdge = dst
-                if self.edges[currendEdge] == "SINK":
-                    found = False
-                    break
-            if found:
-                parallelEdges.append(i)
-        return parallelEdges
-
-    def deleteNode(self, nodename):
-        inEdges = self.incoming[nodename]
-        prevAnchor = ""
-        for i in inEdges:
-            if "A" in self.edges[i]["src"]:
-                prevAnchor = self.edges[i]["src"]
-                break
-        
-        outEdges = self.outgoing[nodename]
-        nextAnchor = ""
-        for j in outEdges:
-            if "A" in self.edges[j]["dst"]:
-                nextAnchor = self.edges[j]["dst"]
-                break
-        
-        for inedge in inEdges:
-            self.edges[inedge]["dst"] = nextAnchor
-        for outedge in outEdges:
-            self.edges[outedge]["src"] = prevAnchor
-        del self.nodes[nodename]
+                    line = ">" + edge + ";{" 
+                    # Source
+                    line += '"src":"' + input_dict[edge]["src"] + '",'
+                    # Destination
+                    line += '"dst":"' + input_dict[edge]["dst"] + '"'
+                    for key in input_dict[edge].keys():
+                        if key == "seq":
+                            continue
+                        if key in keylist:
+                            continue
+                        line += ',"' + key + '":' + json.dumps(input_dict[edge][key], separators=(",", ":"))
+                    line += "}\n"
+                    line += input_dict[edge]["seq"] + "\n"
+                    fastafile.write(line)
+            # If iterating over nodes, just write the nodes normally
+            else:
+                for i in sorted_keys:
+                    line = ">" + i + ";"
+                    obj = {}
+                    for j in input_dict[i].keys():
+                        if j == 'seq':
+                            continue
+                        obj[j] = input_dict[i][j]
+                    line += json.dumps(obj, separators=(",", ":"))
+                    line += "\n" + input_dict[i]['seq'] + "\n"
+                    fastafile.write(line)
         
 
     def returnNodeEdgePath(self, strain, chromo):
@@ -270,6 +260,13 @@ class GraphicalGenome:
                         currentEdge = edge 
         return path 
     
+# Given a CC path, look for all node pairs that do not contain an edge between them that has the specified CC strain on them. 
+# * Parameters: 
+#     * (str) strain - Strain you wish to trace 
+# * (str) chromo - Chromosome you are tracing the strain through 
+# * Output: 
+#     * list(tuple(node, node)) - List of node tuples that do not have any edges between them with the specified CC strain on them.
+# THIS CURRENTLY WORKS FOR EDGES WITHOUT FLOATING NODES, WHEN WE REINTRODUCE FLOATING NODES THIS NEEDS TO BE FIXED
     def findMissingPaths(self, strain, chromo):
         nodePairs = set()
         visited = set()
@@ -290,6 +287,7 @@ class GraphicalGenome:
                 nodePairs.add((self.edges[edge]["src"], self.edges[edge]["dst"]))
         return nodePairs
 
+    # Reconstruct an entire sequence for a given strain across the entire genome
     def reconstructSequence(self, strain, path=0):
         nodes = self.nodes
         edges = self.edges
@@ -338,21 +336,37 @@ class GraphicalGenome:
                         if strain in edges[edge]["strain"] or het in edges[edge]["strain"]:
                             currentEdge = edge
 
-    # Bounding anchors reqiures strains to be in founder sequences (ABCDEFGH)
-    def boundingAnchors(self, strain, startPos, endPos):
-        i1 = numpy.searchsorted(self.sortednodes[strain], startPos) - 1
-        i2 = numpy.searchsorted(self.sortednodes[strain], endPos) - 1
-        if i1 < 0:
-            i1 = 0
-        if i2 < 0:
-            i2 = 0
-        start = self.sortednodes["node"][i1]
-        end = self.sortednodes["node"][i2]
-        return start, end
 
+    # Used in the CLI, writes a sequence to a specified file
     def writeSequence(self, strain, filedest, path=0):
         reconstructed = self.reconstructSequence(strain, path)
         with open(filedest, "w+") as seqfile:
             seqfile.write(reconstructed)
             
-        
+    # Given an anchor, provide the next anchor
+    def nextAnchor(self, node):
+        while True:
+            edge = self.outgoing[node][0]
+            if self.edges[edge]["dst"][0] == "A" or self.edges[edge]["dst"] == "SINK":
+                return self.edges[edge]["dst"]
+            else:
+                node = self.edges[edge]["dst"]
+                
+    # Return a [node, edge, node...] path tracing a strain between two anchors
+    def tracePath(self, strain, start, end):
+        startAnchor = start
+        endAnchor = end
+        path = []
+        current = startAnchor
+        while current != endAnchor:
+            for elem in self.outgoing[current]:
+                if strain in self.edges[elem]["strain"]:
+                    path.append(current)
+                    path.append(elem)
+                    current = self.edges[elem]["dst"]
+        path.append(endAnchor)
+        return path
+    
+    
+    # Bounding Anchors
+        # Given 
