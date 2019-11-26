@@ -133,6 +133,7 @@ class GraphicalGenome:
             enamelen: <int> - Length of the edge key names contained in the edges dictionary
             nnamelen: <int> - Length of the node key names contained in the nodes dictionary
         """
+        
          # Global variables
         self.edgenamelength = enamelen
         self.nodenamelength = nnamelen
@@ -141,7 +142,9 @@ class GraphicalGenome:
         self.nodes, self.edges, self.outgoing, self.incoming, self.max_node_name, self.max_edge_name, self.genes = self.loadChromosomeGraph(nodefile, edgefile)
         self.nodes = Nodes(self.nodes)
         self.edges = Edges(self.edges)
-    
+        self.sortednodes = []
+        self.subpath = []
+        self.subsequence = []
            
     def __repr__(self):
         """Returns the console representation of the Graphical Genome Class. Returns the number of nodes and edges.
@@ -214,6 +217,7 @@ class GraphicalGenome:
 
                 hdr = fp.readline()[1:]
                 seq = fp.readline()
+
 #             # Check existence of gene annotation and add to dictionary
 #             gene_full = re.search(gene_pattern, hdr)
 #             if gene_full:
@@ -416,7 +420,7 @@ class GraphicalGenome:
         source = ""
         het = strain
         if path == 0:
-            het = strain
+            het = strain + 'a'
         elif path == 1:
             het += "a"
         else:
@@ -427,23 +431,24 @@ class GraphicalGenome:
                 if het in edge or strain in edge:
                     source = src
         if source == "":
-            print "strain not found on any source path"
+            print het + "strain not found on any source path"
             return ""
         conseq = ""
 
         # Iterate through the edges in order based on the destinations and outgoing edges from those destinations
         currentEdge = source
         firstNode = edges[source]["dst"]
-        numberN = int(nodes[firstNode][source[-1]]) - 1 - len(edges[source]["seq"])
+        founder_on_that_Edge = list(set(edges[source]['strain']) & set('ABCDEFGH'))[0]
+        numberN = int(nodes[firstNode][founder_on_that_Edge]) - 1 - len(edges[source]["seq"])
         conseq += "N" * numberN
         while True:
             dst = edges[currentEdge]["dst"]
             if dst == "SINK":
                 conseq += edges[currentEdge]["seq"]
-                conseq += ("N" * (int(edges[currentEdge]["seqlen"]) - len(conseq)))
+                conseq += ("N" * int(edges[currentEdge]["addNs"]))
                 return conseq.upper()
             else:
-                if "F" in dst:
+                if "F" in dst or 'B' in dst:
                     conseq += edges[currentEdge]["seq"]
                 else:
                     conseq += edges[currentEdge]["seq"] + nodes[dst]["seq"]
@@ -475,13 +480,33 @@ class GraphicalGenome:
         """Return the next monotonically incrementing anchor given a nodename in the graph
         def nextAnchor(self:<GraphicalGenome>, node:<str>) -> <str>
         """
-        while True:
-            edge = self.outgoing[node][0]
-            if self.edges[edge]["dst"][0] == "A" or self.edges[edge]["dst"] == "SINK":
-                return self.edges[edge]["dst"]
+        foundAnchor = False
+        currentEdge = self.outgoing[node][0]
+        currentNode = self.edges[currentEdge]["dst"]
+        
+        while not foundAnchor:
+            if currentNode[0] == "A" or currentNode == "SINK":
+                foundAnchor = True
             else:
-                node = self.edges[edge]["dst"]
-                
+                currentEdge = self.outgoing[currentNode][0]
+                currentNode = self.edges[currentEdge]["dst"]
+        return currentNode
+
+    def prevAnchor(self, node):
+        """Return the prev monotonically incrementing anchor given a nodename in the graph
+        def prevAnchor(self:<GraphicalGenome>, node:<str>) -> <str>
+        """
+        foundAnchor = False
+        currentEdge = self.incoming[node][0]
+        currentNode = self.edges[currentEdge]["src"]
+        
+        while not foundAnchor:
+            if currentNode[0] == "A" or currentNode == "SOURCE":
+                foundAnchor = True
+            else:
+                currentEdge = self.incoming[currentNode][0]
+                currentNode = self.edges[currentEdge]["src"]
+        return currentNode
     # 
     def tracePath(self, strain, start, end):
         """Return a [node, edge, node...] path tracing a strain between two anchors
@@ -504,4 +529,545 @@ class GraphicalGenome:
                     current = self.edges[elem]["dst"]
         path.append(endAnchor)
         return path
+
+    def entityPath(self, strain="B"):
+        genome = self
+        path = []
+        for i in genome.outgoing["SOURCE"]:
+            edge = genome.edges[i]
+            # Get the first B edge
+            if strain in edge["strain"]:
+                current = i 
+                path.append(current)
+        while current != "SINK":
+            # Floating node
+            if current[0] == "F" or current[0] == "B":
+                for i in genome.outgoing[current]:
+                    edge = genome.edges[i]
+                    if strain in edge["strain"]:
+                        current = i
+                        path.append(current)
+            # Anchor node
+            elif current[0] == "A":
+                for edge in genome.outgoing[current]:
+                    cEdge = genome.edges[edge]
+                    if strain in cEdge["strain"]:
+                        current = edge
+                        path.append(current)
+            # Edge
+            else:
+                current = genome.edges[current]["dst"]    
+                path.append(current)
+        # Add the sink node into the path
+        for i in genome.incoming["SINK"]:
+            edge = genome.edges[i]
+            if strain in edge["strain"]:
+                path.append(i)
+                return path
+        return path
+
+    def findEdge(self, node, strain, ori = 'src'):#given a node and a strain, return the incoming or outgoing edge that contains the strain 
+        het_a = strain + 'a'
+        het_b = strain + 'b'
+        edgelist = []
+        if ori == 'src':
+            for edge in self.outgoing[node]:
+                strainlist = self.edges[edge]['strain']
+                if strain in strainlist or het_a in strainlist or het_b in strainlist or len(self.outgoing[node])==1:
+                    edgelist.append(edge)
+            return edgelist
+        elif ori == 'dst':
+            for edge in self.incoming[node]:
+                strainlist = self.edges[edge]['strain']
+                if strain in strainlist or het_a in strainlist or het_b in strainlist or len(self.incoming[node])==1:
+                    edgelist.append(edge)
+            return edgelist
+        
+    def anchorPosList(self):   #populates global field: self.sortednodes but also returns it
+        #will return a dictionary of anchors as keys with 8 [founder] values that show their coordinates
+        tmp = []
+        for i in sorted(self.nodes.keys(), key = lambda n: int(self.nodes[n]["B"])):
+            tup = (i, int(self.nodes[i]["A"]), int(self.nodes[i]["B"]), int(self.nodes[i]["C"]),
+              int(self.nodes[i]["D"]), int(self.nodes[i]["E"]), int(self.nodes[i]["F"]), 
+              int(self.nodes[i]["G"]), int(self.nodes[i]["H"]))
+            tmp.append(tup)
+        dt = [("node", "U20"), ("A", "i8"), ("B", "i8"), ("C", "i8"), ("D", "i8"), 
+          ("E", "i8"), ("F", "i8"), ("G", "i8"), ("H", "i8")]
+        Sortednodes = numpy.array(tmp, dtype=dt)
+        return Sortednodes    
+            
+    def boundingAnchors(self, strain, startPos, endPos): #
+        """returns the bouding anchors of the given strain and coordinate positions, takes time for the first query
+        def boundingAnchors(self:<GraphicalGenome>, strain:<str>, startPos:<int>, endPos:<int>):
+        
+        Parameters:
+            strain: <str> - Founder or CC path that you want to follow. 
+            start: <int> - Start linear coordinate
+            end: <int> - End linear coordinate. Could be the same or larger than start.
+        """
+        assert endPos >= startPos, "endPos must be larger than the startPos"
+        
+        if len(self.sortednodes) == 0:
+            self.sortednodes = self.anchorPosList()           
+        Sortednodes = self.sortednodes
+        i1 = numpy.searchsorted(Sortednodes[strain], startPos) - 1
+        i2 = numpy.searchsorted(Sortednodes[strain], endPos) 
+        if i1 < 0 and i2 != len(Sortednodes):
+            start = 'SOURCE'
+            end = Sortednodes["node"][i2]
+        elif i1 < 0 and i2 == len(Sortednodes):
+            start = 'SOURCE'
+            end = 'SINK'
+        elif i2 == len(Sortednodes):
+            start = Sortednodes["node"][i1]
+            end = 'SINK'
+        else:
+            start = Sortednodes["node"][i1]
+            end = Sortednodes["node"][i2]
+        return start, end
     
+    def findNumOfFloatingNodes(self,startingAnchor, destAnchor):
+        """returns the number of FloatingNodes between anchor pairs
+        def findNumOfFloatingNodes(self (Graph),startingAnchor, destAnchor)
+        
+        Parameters:
+            starting Anchor: <int> - Start anchor
+            ending Anchor: <int> - End anchor
+        """
+        founders = ['A','B','C','D','E','F','G','H']
+        dictionary = {}
+        for founder in founders:
+            #get the founder's path including floating nodes
+            path = self.tracePath(founder,startingAnchor,destAnchor)
+            #find all the floating nodes in the path and add them to a dictionary.
+            for item in path:
+                if 'B' in item:
+                    try:
+                        dictionary[item]+=1
+                    except KeyError:
+                        dictionary[item]=1
+        return len(dictionary) 
+    
+
+    def Enumerate_anchor_by_anchor(self, start, end, sofar = [], strain = set('ABCDEFGH')):
+        """helper function for getSubPath function, implement Path entity to self.subpath
+        def Enumerate_anchor_by_anchor(self, start, end, sofar = [], strain = set('ABCDEFGH')):
+        
+        Parameters:
+            start: <int> - Start anchor
+            end: <int> - the anchor next to the start anchor
+        """ 
+        # termination by node
+        if start == end:   
+            sofar1 = sofar
+            if len(strain)>0:
+                self.subpath.append((sofar1, strain))
+            return 
+
+        if len(strain) <1:
+            return  
+
+        for edge in self.outgoing[start]:               
+            self.Enumerate_anchor_by_anchor(self.edges[edge]['dst'], end, sofar = sofar + [start, edge], strain = strain & set(self.edges[edge]['strain']))
+
+    
+    def findsequence(self, pathlist, countinganchor = False):
+        """Given a list for path entity, construct the sequence on the path
+        def findsequence(self, pathlist, countinganchor = False):
+        
+        Parameters:
+            pathlist: <list> - entity list that construct the path, including nodes and edges
+            countinganchor: <logic> default False: do not counting the first and the last anchor, else, counting anchor sequence
+        """
+        seq = ''
+        for item in pathlist:
+            if item.startswith('A'):
+                if countinganchor == True:
+                    seq += self.nodes[item]['seq']
+                else:
+                    seq += '' # do not count anchor length
+            elif item.startswith('L') or item.startswith('E')or item.startswith('K'):
+                seq += self.edges[item]['seq']
+            elif item.startswith('S') and item != "SOURCE" and item != 'SINK':
+                seq += self.edges[item]['seq']
+            else:
+                seq += ''
+        return seq
+
+# Updated Aug 20, 2019, construct subsequences between each anchor pair then merge them together
+    def getSubPath(self, startanchor, endanchor, init_strain = set("ABCDEFGH"), seq = False, counting_anchor = True): 
+        """Get all subpath between two anchor, return a list with tuple: if seq = "False" return (itemlist, shared strain) , else return (sequence, shared strain), the path includes the start and end anchors
+        def getSubPath(self, startanchor, endanchor, seq = False
+
+        Parameters:
+            startanchor: <str> - starting anchor
+            endanchor: <str> ending anchor
+            init_strain: <set> the set for all possible strains; default: the 8 founder strain set
+            seq: <logic> default False: return (path entity, strain);if True: return (sequence, strain)
+            counting_anchor <logic> default True, including the bounding anchor sequences
+        """
+        Subgraph = []
+        anchor = startanchor
+        while anchor != endanchor:
+            self.subpath = []
+            self.Enumerate_anchor_by_anchor(anchor, self.nextAnchor(anchor), strain = init_strain)
+
+            if len(Subgraph) == 0:
+                Subgraph = self.subpath
+            else:
+                New_Subgraph = []
+                for prev_edgelist, prev_strain in Subgraph:
+                    for new_edge, new_strain in self.subpath:                    
+                        strain = prev_strain & new_strain
+                        if len(strain)>0:
+                            edgelist = prev_edgelist + new_edge
+                            New_Subgraph.append((edgelist, strain))
+                Subgraph = New_Subgraph        
+            anchor = self.nextAnchor(anchor)
+
+        # add the last anchor
+        for item in Subgraph:
+            item[0].append(endanchor)
+        
+        # return seq or edgelist
+        if seq == True:
+            Subsequence = []
+            for itemlist, strain in Subgraph:
+                Sequence = self.findsequence(itemlist, countinganchor = counting_anchor) # revise Sep 30, 19. When returning sequence, default include the start and end anchor sequences.
+                Subsequence.append((Sequence, strain))
+            return Subsequence
+        else:
+            return Subgraph
+
+##
+    # demote anchors as suggest in FigureS2
+    def DemoteAnchor(self, anchor):
+        """Demote Anchor sequence to floating nodes, edge, floating nodes
+        def DemoteAnchor(self, anchor)
+        
+        Parameters:
+            anchor: <str> - anchor name
+        """
+        chromo = int(anchor.split('.')[0][1:])
+        #edgelist = Graph.edges.keys()
+        # incoming edge
+        self.incoming['F%02d.%08d' % (chromo, int(anchor.split('.')[1]))] = []
+        for edge in self.incoming[anchor]:
+            self.edges[edge]['dst'] = 'F%02d.%08d' % (chromo, int(anchor.split('.')[1]))
+            self.incoming['F%02d.%08d' % (chromo, int(anchor.split('.')[1]))].append(edge)
+        #outgoing edge
+        index = 0
+        self.outgoing['F%02d.%08d' % (chromo, int(anchor.split('.')[1])+1)] = []
+        for edge in self.outgoing[anchor]:
+            self.edges[edge]['src'] = 'F%02d.%08d' % (chromo, int(anchor.split('.')[1])+1)
+            index += 1
+            if edge.startswith('E'):
+                name = 'E%02d.%07d%01d' % (chromo, int(anchor.split('.')[1])+1, index)
+                #assert name not in edgelist
+                self.edges[name] = self.edges[edge]
+                self.outgoing['F%02d.%08d' % (chromo, int(anchor.split('.')[1])+1)].append(name)
+                dst = self.edges[edge]['dst']
+                self.incoming[dst].remove(edge)
+                self.incoming[dst].append(name)
+                self.edges.removeEdge(edge)
+            else:
+                self.outgoing['F%02d.%08d' % (chromo, int(anchor.split('.')[1])+1)].append(edge)
+        # create new edge
+        newname = 'E%02d.%07d%01d' % (chromo, int(anchor.split('.')[1]), 1)
+        New_Dict = {}
+        New_Dict['seq'] = self.nodes[anchor]['seq']
+        New_Dict['strain'] = list('ABCDEFGH')
+        New_Dict['src'] = 'F%02d.%08d' % (chromo, int(anchor.split('.')[1]))
+        New_Dict['dst'] = 'F%02d.%08d' % (chromo, int(anchor.split('.')[1])+1)
+        New_Dict['singleton'] = 'Conserved'
+        New_Dict['variants'] = '45='
+        for key in ['gene', 'exon', 'repeatclass']:
+            if key in self.nodes[anchor].keys():
+                New_Dict[key] = self.nodes[anchor][key]
+
+        self.edges[newname] = New_Dict
+        self.outgoing['F%02d.%08d' % (chromo, int(anchor.split('.')[1]))]= [newname]
+        self.incoming['F%02d.%08d' % (chromo, int(anchor.split('.')[1])+1)]= [newname]
+        # demote anchor
+        self.nodes.removeNode(anchor)
+        
+## Graph-coordinate System
+## linear-graph entity transformation
+## Vertical Projection
+## Homologous Sequence abstraction
+## Under Construction
+    def processCigar(self, cigar):
+        """Helper Function, may not be used directly, expand Cigar string
+        
+        Parameters:
+            cigar: <str> - compressed cigar
+        """
+        out = ''
+        N = 0
+        for symbol in cigar:
+            if symbol in '0123456789':
+                N = 10*N + int(symbol)
+            else:
+                #if (symbol != 'D'):
+                if (N == 0):
+                    out += symbol
+                else:
+                    out += N*symbol
+                N = 0
+        return out
+
+    def combineCigar(self, cigar):
+        """Helper Function, may not be used directly, compress Cigar string
+        
+        Parameters:
+            cigar: <str> - expanded cigar
+        """
+        cigar = cigar +'$'
+        out = ''
+        N = 0
+        start = 0
+        for i in range(1,len(cigar)):
+            if cigar[i-1] != cigar[i]:
+                out += str(i-start) + cigar[i-1]
+                start = i
+        return out  
+    
+## helper function for get floating node coordinate: start from floating nodes, traverse forward until the first anchor
+    def Traverseforward(self, fnode, sofar = '', strain = set('ABCDEFGH')):
+        """Helper Function, may not be used directly, traverse path from floating node to find the proximal anchor
+        subpath are stored in self.subpath
+        Parameters:
+            fnode: <str> - floating node name
+        """
+        # termination by anchor node
+        if fnode.startswith('A'):   
+            sofar1 = self.nodes[fnode]['seq'] + sofar
+            if len(strain)>0:
+                self.subpath.append((sofar1, strain))
+            return 
+
+        if len(strain) <1:
+            return  
+
+        for edge in self.incoming[fnode]:               
+            self.Traverseforward(self.edges[edge]['src'], sofar =  self.edges[edge]['seq'] + sofar , strain = strain & set(self.edges[edge]['strain']))
+
+# given node name, return dictionary for node coordinates: for floating node, return the coordinates for the base right before the floating node (1 base coordinates)
+    def Nodecoordinates(self, node):
+        """Given node name, return dictionary for linear coordinates for each node
+        for floating node, by coordinates it refer to the base right after the floating node (1 base coordinates)
+        Parameters:
+            fnode: <str> - node name, compatible for both anchor and floating nodes
+        """
+        node_coord = {}
+        if node.startswith('A'):
+            for s in 'ABCDEFGH':
+                node_coord[s] = int(self.nodes[node][s])
+        elif node == 'SOURCE':
+            for s in 'ABCDEFGH':
+                node_coord[s] = 0        
+        else:
+            self.subpath = []
+            self.Traverseforward(node)
+            prev_anchor = self.prevAnchor(node)
+            for seq, strain in self.subpath:
+                for s in strain:
+                    node_coord[s] = int(self.nodes[prev_anchor][s]) + len(seq) 
+        return node_coord
+    
+    ## given graph entity(anchor or edge), offset and strain, return linear coordinates
+    def entity_to_linearcoord(self, entity, offset, strain):
+        """Given Graph entity (anchor or edge), offset and strain attributes, return linear coordinates for the base position
+        
+        Parameters:
+            entity: <str> - anchor or edge that contain sequences
+            offset: <int> - base position on the entity
+            strain: <str> - specify strain attributes for the linear coords, given strain attributes to the entity, this could be multiple choices.
+        """
+        if entity.startswith('A'):
+            node_coord = self.Nodecoordinates(entity)
+            return node_coord[strain] + offset
+        else:
+            node = self.edges[entity]['src']
+            node_coord = self.Nodecoordinates(node)
+            if node.startswith('A'):
+                return node_coord[strain] + 45 + offset
+            else:
+                return node_coord[strain] + offset
+            
+    ## given linear coordinates in strain, return graph entity(anchor or edge) plus offset 
+    def linear_to_entityoffset(self, coord, strain):
+        """Given linear coordinates, return graph entity + offset
+        
+        Parameters:
+            coord: <int> - linear coordinate 
+            strain: <str> - strain attributes for the linear coords 
+        """
+        sanchor, eanchor = self.boundingAnchors(strain, coord, coord)
+        offset = coord - int(self.nodes[sanchor][strain])
+        itemlist = self.tracePath(strain, sanchor, eanchor,)
+        seq = 0
+        for item in itemlist:
+            if item.startswith('A'):
+                newseq = seq + len(self.nodes[item]['seq'])
+            elif item.startswith('B') or item.startswith('F') or item == "SOURCE" or item == 'SINK':
+                newseq = seq
+            else:
+                newseq = seq + len(self.edges[item]['seq'])
+            if newseq > offset:
+                break
+            else:
+                seq = newseq
+        current_offset = offset - seq
+        entity = item
+        return (entity, current_offset)
+    
+    # Graph Entity plus offset to anchors, return dictionary
+    def entity_to_anchor(self, entity, offset, ref_node = False):
+        """Given Graph entity (anchor or edge), offset and strain attributes, return linear coordinates for the base position
+
+        Parameters:
+            entity: <str> - anchor or edge that contain sequences
+            offset: <int> - base position on the entity
+            strain: <str> - specify strain attributes for the linear coords, given strain attributes to the entity, this could be multiple choices.
+            ref_node: <str> - default proximal anchor, or 
+                            - "SOURCE" return linear coordinates, specifying the anchor that refer to
+        """
+        Strain_Offset = {}
+        if entity.startswith('A'):
+            if ref_node == False: # default proximal anchor
+                for s in 'ABCDEFGH':
+                    Strain_Offset[s] = offset
+                return (entity, Strain_Offset)
+            elif ref_node == "SOURCE": # linear coordinates
+                node_coord = self.Nodecoordinates(entity)
+                for s in "ABCDEFGH":
+                    Strain_Offset[s] = node_coord[s] + offset
+                return ("SOURCE", Strain_Offset) 
+            else: # other anchor
+                node_coord = self.Nodecoordinates(entity)
+                for s in "ABCDEFGH":
+                    ref_coord = int(self.nodes[ref_node][s])
+                    Strain_Offset[s] = node_coord[s] - ref_coord + offset         
+                return (ref_node, Strain_Offset)
+        else:
+            node = self.edges[entity]['src']
+            node_coord = self.Nodecoordinates(node)
+            strainlist = node_coord.keys()
+            if ref_node == False: # default
+                if node.startswith('A'):
+                    for s in strainlist:
+                        Strain_Offset[s] = node_coord[s] + 45 + offset
+                    return (node, Strain_Offset)
+                else:
+                    proximal_anchor = self.prevAnchor(node)
+                    for s in strainlist:
+                        pos = int(self.nodes[proximal_anchor][s])
+                        Strain_Offset[s] = node_coord[s] + offset - pos                
+                    return (proximal_anchor, Strain_Offset)
+
+            elif ref_node == 'SOURCE': # Linear            
+                if node.startswith('A'):
+                    for s in strainlist:
+                        Strain_Offset[s] = node_coord[s] + 45 + offset
+                else:
+                    for s in strainlist:
+                        Strain_Offset[s] = node_coord[s] + offset
+
+                return (ref_node, Strain_Offset)
+            else:
+                if node.startswith('A'):
+                    for s in strainlist:
+                        ref_pos = int(self.nodes[ref_node][s])
+                        Strain_Offset[s] = node_coord[s] + 45 + offset - ref_pos
+                else:
+                    for s in strainlist:
+                        ref_pos = int(self.nodes[ref_node][s])
+                        Strain_Offset[s] = node_coord[s] + offset - ref_pos
+                return (ref_node, StrainOffset)
+
+    def linear_to_anchoroffset(self, coord, strain, ref_node = False ):
+        """Given linear coordinates, return graph entity + offset
+        Parameters:
+            coord: <int> - linear coordinate 
+            strain: <str> - strain attributes for the linear coords 
+            ref_node: <str> - default proximal anchor, or 
+                            - "SOURCE" return linear coordinates, specifying the anchor that refer to
+        """
+        sanchor, eanchor = self.boundingAnchors(strain, coord, coord)
+        offset = coord - int(self.nodes[sanchor][strain])
+        if ref_node == False:        
+            return (sanchor, offset)
+        elif ref_node == "SOURCE":
+            return (ref_node, coord)
+        else:
+            current_offset = coord - int(self.nodes[ref_node][strain])
+            return(ref_node, current_offset)
+        
+        
+    def Parallel_edge_offset_exchange(self, entity, offset, alter_strain, strain = 'B'):
+        """Alignment-based entity offset exchange
+        (only apply to parallel edge, edge share the same src and dst, offset exchange in Path scale are not finished yet)
+        Given entity+offset on B path, return the position on the alternative strain
+        If alignment results are not applicable, return None
+        
+        Parameters:
+            entity: <str> - Graph entity on B path
+            offset: <int> - offset on the entity
+            alter_strain: <str> - strain attributes for the target alternative path position
+            strain: <default> "B" path, when multi-alignment cigar are added, this could be further implemented
+        """
+        if entity.startswith('A'):
+            alter_item = entity
+            return (alter_item, offset)
+        else:
+            s_anchor = self.edges[entity]['src']        
+            for edge in self.outgoing[s_anchor]:
+                if alter_strain in self.edges[edge]['strain']:
+                    alter_item = edge
+                    assert self.edges[entity]['dst'] == self.edges[alter_item]['dst'], "Not parallel edge"
+                    break
+            else:
+                return 
+
+            if 'variants' in self.edges[alter_item].keys():
+                cigar = self.processCigar(self.edges[alter_item]['variants'])
+                ref_index = 0
+                alt_index = 0
+                if ref_index == offset:
+                    if cigar[ref_index] == 'D':
+                        return (alter_item, alt_index, 'D')
+                    else:
+                        return (alter_item, alt_index)
+
+                for i in range(len(cigar)): # index of all cigar string
+                    if cigar[i] in 'MDS=X':
+                        ref_index += 1 # coordinates in ref
+                    if cigar[i] in 'MIS=X':
+                        alt_index += 1 # coordinate in alt
+                    if ref_index == offset:
+                        if cigar[i] == 'D':
+                            return (alter_item, alt_index, 'D')
+                        else:
+                            return (alter_item, alt_index)
+            else:
+                return 
+            
+    def Vertical_linearpos_exchange(self, coord, alter_strain, strain = 'B'):
+        """Alignment-based entity offset exchange
+        Given linear coord on B path, return corresponding linear coordinates on the alternative genome
+        If alignment results are not applicable, return None
+        
+        Parameters:
+            coord: <int> - linear coordinates on B path
+            alter_strain: <str> - strain attributes for the target alternative genome position
+            strain: <default> "B" path, when multi-alignment cigar are added, this could be further implemented
+        """
+        entity, offset = self.linear_to_entityoffset(coord, 'B')
+        if self.Parallel_edge_offset_exchange(entity, offset, alter_strain) != None:
+            Item = self.Parallel_edge_offset_exchange(entity, offset, alter_strain)
+            alt_entity = Item[0]
+            alt_offset = Item[1]
+            return self.entity_to_linearcoord(alt_entity, alt_offset, alter_strain)
+        else:
+            return
