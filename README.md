@@ -15,6 +15,6 @@ A basic command line interface that allows you to perform simple commands like s
 ### Sample Graphical Genome data set 
 This dataset will allow you to use the tools specified above and is meant to showcase the utility of the Graphical Genome. 
 
-## Dataset hosted
+### Dataset
 
-`curl -O ftp://ftp.csbio.unc.edu/CCGG/Version0.9.zip`
+Found on our project website. 
